@@ -388,7 +388,7 @@ class Ship3D extends THREE.Group {
 					m.position.set( x, y, z );
 					m.scale.set( d.length, d.breadth, d.height );
 					m.name = object.id;
-					m.group = bo.affiliations.group != undefined ? bo.affiliations.group : undefined;
+					try { m.group = bo.affiliations.group; } catch(e) {}
 					self.blocks.add( m );
 
 				},
@@ -400,7 +400,7 @@ class Ship3D extends THREE.Group {
 					m.position.set( x, y, z );
 					m.scale.set( d.length, d.breadth, d.height );
 					m.name = object.id;
-					m.group = bo.affiliations.group != undefined ? bo.affiliations.group : undefined;
+					try { m.group = bo.affiliations.group; } catch(e) {}
 					self.blocks.add( m );
 
 				}
@@ -413,7 +413,7 @@ class Ship3D extends THREE.Group {
 			m.position.set( x, y, z );
 			m.scale.set( d.length, d.breadth, d.height );
 			m.name = object.id;
-			m.group = bo.affiliations.group != undefined ? bo.affiliations.group : undefined;
+			try { m.group = bo.affiliations.group; } catch(e) {}
 			this.blocks.add( m );
 
 		}

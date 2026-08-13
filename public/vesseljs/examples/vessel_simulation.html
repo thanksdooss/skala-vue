@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Vessel.js Ship in Ocean</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #0a1628; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    "use strict";
+
+    import * as THREE from "./3D_engine/three_r126.js";
+    import { OrbitControls } from "./3D_engine/OrbitControls.js";
+    import * as Vessel from "../source/jsm/vessel.js";
+    import { Ship3D } from "../source/jsm/3D_engine/Ship3D.js";
+    import { Skybox } from "./3D_engine/skybox.js";
+    import { Ocean } from "./3D_engine/Regular_ocean.js";
+
+    var renderer, camera, controls;
+    var scene, zUpCont, ocean, ship3D, ship3DGhost, wavMo, skybox;
+
+    var waveAmplitude = 1.5;
+    var wavePeriod = 8.0;
+    var waveDirection = 180;
+    var shipRef = null;
+    var statesRef = null;
+    var currentVelocity = 0;
+    var currentDirection = 0;
+    var windSpeed = 0;
+    var windDirection = 0;
+    var activeLevel = 'lvl1';
+    var hullRes = null;
+    var stabilityData = null;
+    var lastWindHeel = 0;
+    var lastDriftAngle = 0;
+    var lastLateralDrift = 0;
+    var lastSpeedLoss = 0;
+    var showGhost = false;
+    var shipDraft = 6.5;
+
+    // Listen for Marine API data from parent Vue app
+    window.addEventListener("message", function(event) {
+      if (event.data && event.data.type === "MARINE_API_UPDATE") {
+        const d = event.data;
+        if (d.waveHeight !== undefined && d.waveHeight > 0) waveAmplitude = d.waveHeight / 2;
+        if (d.wavePeriod !== undefined && d.wavePeriod > 0) wavePeriod = d.wavePeriod;
+        if (d.waveDirection !== undefined) waveDirection = d.waveDirection;
+        if (d.currentVelocity !== undefined) currentVelocity = d.currentVelocity;
+        if (d.currentDirection !== undefined) currentDirection = d.currentDirection;
+        if (d.windSpeed !== undefined) windSpeed = d.windSpeed;
+        if (d.windDirection !== undefined) windDirection = d.windDirection;
+        if (d.activeLevel) activeLevel = d.activeLevel;
+        if (d.showGhost !== undefined) {
+          showGhost = d.showGhost;
+          if (ship3DGhost) ship3DGhost.visible = showGhost;
+        }
+
+        // Update ocean cosine wave visual parameters
+        if (ocean && ocean.waves && ocean.waves.length > 0) {
+          ocean.waves[0].A = waveAmplitude;
+          ocean.waves[0].T = wavePeriod;
+          ocean.waves[0].theta = waveDirection;
+        }
+
+        // Recreate WaveMotion with new wave parameters for accurate RAO
+        if (ocean && ocean.wavCre && shipRef && statesRef) {
+          var freq = 2 * Math.PI / wavePeriod;
+          ocean.wavCre.setWaveDef(freq, waveAmplitude, waveDirection);
+
+          // Must rebuild WaveMotion — RAO depends on wave frequency
+          try {
+            wavMo = new Vessel.WaveMotion(shipRef, statesRef, ocean.wavCre);
+            ocean.waveMotions = [wavMo];
+          } catch(e) {
+            console.warn("WaveMotion rebuild error:", e);
+          }
+        }
+
+        sendMotionData();
+      }
+    });
+
+    (async function main() {
+      document.body.style.overflow = "hidden";
+      var container = document.createElement("div");
+      Object.assign(container.style, {
+        position: "absolute", top: "0", left: "0",
+        width: "100vw", height: "100vh"
+      });
+      document.body.appendChild(container);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setClearColor(0x99aadd);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
+
+      // Scene
+      scene = new THREE.Scene();
+      var oSize = 2048;
+
+      // Add Skybox (sky + sun light) — original Vessel.js component
+      skybox = new Skybox(oSize, "3D_engine/textures/skyboxsun25degtest1.png");
+      scene.add(skybox);
+
+      // Z-up convention (naval architecture standard)
+      THREE.Object3D.DefaultUp.set(0, 0, 1);
+      zUpCont = new THREE.Group();
+      zUpCont.rotation.x = -0.5 * Math.PI;
+      scene.add(zUpCont);
+
+      // Camera — positioned to see ship from stern quarter, like bridge view
+      camera = new THREE.PerspectiveCamera(
+        26, window.innerWidth / window.innerHeight, 1, 1.75 * oSize
+      );
+      camera.up.set(0, 1, 0);
+      camera.position.set(-120, 60, 120);
+
+      // OrbitControls
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0, 0);
+      controls.minDistance = 50;
+      controls.maxDistance = 800;
+      controls.update();
+
+      // Additional ambient light
+      scene.add(new THREE.AmbientLight(0x606070, 0.4));
+
+      // Ocean — Vessel.js Regular Ocean with cosine waves
+      ocean = new Ocean({
+        size: oSize,
+        segments: 127,
+        sunDir: skybox.getSun().position.clone().normalize(),
+        path: "3D_engine/textures/waternormals.jpg"
+      });
+
+      // Add initial wave matching Marine API defaults
+      ocean.addCosineWave({
+        A: waveAmplitude,
+        T: wavePeriod,
+        theta: waveDirection,
+        phi: 0
+      });
+
+      zUpCont.add(ocean);
+
+      // Load ship specification (PX121 Platform Supply Vessel)
+      try {
+        var shipSpecResponse = await fetch("ship_specs/PX121_dbb.json");
+        var shipSpec = await shipSpecResponse.json();
+
+        var ship = new Vessel.Ship(shipSpec);
+        shipRef = ship;
+        statesRef = ship.designState;
+
+        ship3D = new Ship3D(ship, { deckOpacity: 0, objectOpacity: 0 });
+        zUpCont.add(ship3D);
+
+        // Ghost reference ship: outer hull wireframe only, at calm water attitude
+        ship3DGhost = new Ship3D(ship, { deckOpacity: 0, objectOpacity: 0 });
+        ship3DGhost.traverse(function(child) {
+          if (child.isMesh) {
+            var mat = child.material;
+            // Hide decks, objects, internal structures (bulkheads, double bottom, etc.)
+            // Only keep fully opaque hull shell (opacity ~1.0)
+            if (!mat || !child.visible || mat.opacity < 0.5) {
+              child.visible = false;
+            } else {
+              child.material = new THREE.MeshBasicMaterial({
+                color: 0x00a261,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.4
+              });
+            }
+          }
+        });
+        ship3DGhost.visible = showGhost;
+        zUpCont.add(ship3DGhost);
+
+        // Vessel.js WaveMotion 6-DOF seakeeping engine
+        var freq = 2 * Math.PI / wavePeriod;
+        ocean.wavCre.setWaveDef(freq, waveAmplitude, waveDirection);
+        wavMo = new Vessel.WaveMotion(shipRef, statesRef, ocean.wavCre);
+        ocean.addWaveMotion(wavMo);
+
+        // Level 3: Calculate initial stability
+        try {
+          stabilityData = shipRef.calculateStability(statesRef);
+        } catch(e) {
+          console.warn('Stability calculation error:', e);
+        }
+
+        // Level 4: Create HullResistance instance
+        try {
+          var propeller = { D: 3.2, noProps: 2, P: 3.5, AeAo: 0.55 }; // PSV-class defaults
+          hullRes = new Vessel.HullResistance(shipRef, statesRef, propeller, ocean.wavCre);
+        } catch(e) {
+          console.warn('HullResistance init error:', e);
+        }
+
+        sendMotionData();
+      } catch(e) {
+        console.error("Ship loading error:", e);
+      }
+
+      // Resize handler
+      window.addEventListener("resize", onResize);
+      onResize();
+
+      function onResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      // Animation loop
+      var frameCount = 0;
+      function animate(t) {
+        requestAnimationFrame(animate);
+        var tSec = t / 1000;
+
+        // Update ocean mesh vertices (Vessel.js cosine wave surface animation)
+        ocean.update(tSec);
+
+        // Apply Vessel.js WaveMotion RAO dynamics to Ship3D
+        if (wavMo && ship3D) {
+          try {
+            var motion = wavMo.verticalMotion;
+            var rollAmp = wavMo.rollAmp;
+
+            if (motion) {
+              var encounterFreq = 2 * Math.PI / wavePeriod;
+
+              // Base wave motion (always present)
+              var baseHeave = motion.heaveAmp * Math.cos(encounterFreq * tSec);
+              var basePitch = motion.pitchAmp * Math.sin(encounterFreq * tSec);
+              var baseRoll = (rollAmp || 0) * Math.sin(encounterFreq * tSec * 0.7);
+
+              // Level-specific 3D effects (physics-accurate)
+              if (activeLevel === 'lvl2') {
+                // Level 2: Drift & Manoeuvring
+                var currentDriftX = (lastCurrentVel || 0) * tSec * Math.cos(currentDirRad);
+                var currentDriftY = (lastCurrentVel || 0) * tSec * Math.sin(currentDirRad);
+                ship3D.position.x = currentDriftX;
+                ship3D.position.y = currentDriftY;
+                ship3D.position.z = baseHeave;
+                ship3D.rotation.y = basePitch;
+                ship3D.rotation.x = baseRoll;
+              } else if (activeLevel === 'lvl3') {
+                // Level 3: Wind Heel — exact heel angle + wave motion
+                var windHeelRad = (lastWindHeel || 0) * Math.PI / 180;
+                ship3D.position.z = baseHeave;
+                ship3D.rotation.y = basePitch;
+                ship3D.rotation.x = baseRoll + windHeelRad;
+                ship3D.rotation.z = 0;
+                ship3D.position.x = 0;
+              } else if (activeLevel === 'lvl4') {
+                // Level 4: Speed Loss — slower encounter from resistance
+                var lossFrac = (lastSpeedLoss || 0) / 100;
+                var slowFreq = encounterFreq * Math.max(1 - lossFrac, 0.5);
+                ship3D.position.z = motion.heaveAmp * Math.cos(slowFreq * tSec);
+                ship3D.rotation.y = motion.pitchAmp * Math.sin(slowFreq * tSec);
+                ship3D.rotation.x = (rollAmp || 0) * Math.sin(slowFreq * tSec * 0.7);
+                ship3D.rotation.z = 0;
+                ship3D.position.x = 0;
+              } else {
+                // Level 1 (default): Pure seakeeping from RAO
+                ship3D.position.z = baseHeave;
+                ship3D.rotation.y = basePitch;
+                ship3D.rotation.x = baseRoll;
+                ship3D.rotation.z = 0;
+                ship3D.position.x = 0;
+              }
+            }
+          } catch(e) {
+            // Fallback gentle motion
+            ship3D.position.z = waveAmplitude * Math.cos(tSec * 0.8);
+            ship3D.rotation.y = 0.015 * Math.sin(tSec * 0.5);
+          }
+        }
+
+        // Ghost: same position as dynamic ship, but zero rotation (calm water attitude)
+        if (ship3DGhost && ship3DGhost.visible) {
+          ship3DGhost.position.copy(ship3D.position);
+          ship3DGhost.rotation.set(0, 0, 0);
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+
+        // Send motion telemetry to parent Vue app every ~30 frames
+        frameCount++;
+        if (frameCount % 30 === 0) sendMotionData();
+      }
+
+      function sendMotionData() {
+        try {
+          // Level 1: Seakeeping RAO
+          var heaveAmp = 0, pitchAmp = 0, rollAmpVal = 0, vertMov = 0, vertAcc = 0;
+          if (wavMo) {
+            var motion = wavMo.verticalMotion;
+            if (motion) {
+              heaveAmp = motion.heaveAmp || 0;
+              pitchAmp = motion.pitchAmp || 0;
+              vertMov = motion.verticalMov || 0;
+              vertAcc = motion.verticalAcc || 0;
+            }
+            rollAmpVal = wavMo.rollAmp || 0;
+          }
+
+          // Level 2: Drift & Manoeuvring
+          var driftAngle = 0, rudderComp = 0, lateralDrift = 0;
+          if (currentVelocity > 0) {
+            var shipSpeed = 10 * 0.5144; // 10 knots in m/s (design speed)
+            var Vc = currentVelocity;
+            var headingRad = 0; // ship heading (assume 0 for now)
+            var thetaC = currentDirection * Math.PI / 180;
+            var relAngle = thetaC - headingRad;
+            var lateralV = Vc * Math.sin(relAngle);
+            var longitudinalV = shipSpeed + Vc * Math.cos(relAngle);
+            driftAngle = Math.atan2(lateralV, Math.abs(longitudinalV)) * 180 / Math.PI;
+            rudderComp = Math.min(Math.abs(driftAngle * 2.5), 35); // max 35° rudder
+            lateralDrift = Math.abs(lateralV);
+          }
+
+          // Level 3: Wind Heel & Stability
+          var windHeelDeg = 0, gmt = 0, gmtStatus = 'N/A';
+          if (stabilityData) {
+            gmt = stabilityData.GMt || 0;
+          }
+          if (windSpeed > 0 && gmt > 0 && shipRef) {
+            var Vw = windSpeed / 3.6; // km/h to m/s
+            var rhoAir = 1.225;
+            var LOA = shipRef.attributes.LOA || 82;
+            var Depth = shipRef.attributes.Depth || 8;
+            var Draft = 6.5;
+            var Aw = LOA * (Depth - Draft + 3) * 0.6; // windage area above waterline
+            var hw = (Depth - Draft + 3) / 2; // center of windage above waterline
+            var displacement = LOA * 18 * Draft * 0.68 * 1025; // approx Δ in kg
+            var windMoment = 0.5 * rhoAir * Vw * Vw * Aw * hw;
+            var restoreMoment = displacement * 9.81 * gmt;
+            windHeelDeg = (restoreMoment > 0) ? (windMoment / restoreMoment) * (180 / Math.PI) : 0;
+            windHeelDeg = Math.min(windHeelDeg, 45); // cap at 45°
+          }
+          if (gmt > 0.5) gmtStatus = 'SAFE';
+          else if (gmt > 0.15) gmtStatus = 'WARNING';
+          else gmtStatus = 'CRITICAL';
+
+          lastWindHeel = windHeelDeg; // Save for animation loop
+          lastDriftAngle = driftAngle;
+          lastLateralDrift = lateralDrift;
+
+          // Level 4: Hull Resistance & Speed Loss
+          var calmRes = 0, addedRes = 0, effectivePower = 0, speedLossPct = 0;
+          if (hullRes) {
+            try {
+              calmRes = hullRes.calmResistance / 1000 || 0; // N to kN
+              var totalR = hullRes.totalResistance;
+              if (totalR) {
+                addedRes = (totalR.Rtadd / 1000) - calmRes || 0;
+                effectivePower = (totalR.Pe / 1000) || 0; // W to kW
+              }
+              if (calmRes > 0) {
+                speedLossPct = Math.min((addedRes / (3 * calmRes)) * 100, 50);
+              }
+            } catch(e) {
+              // Use simplified Holtrop if HullResistance fails
+              var Hs = waveAmplitude * 2;
+              addedRes = 18.5 * Hs * Hs * Math.sqrt(290 / 100) / 1000;
+            }
+          }
+
+          lastSpeedLoss = speedLossPct; // Save for animation loop
+
+          window.parent.postMessage({
+            type: "VESSEL_MOTION_DATA",
+            // Level 1
+            heaveAmp, pitchAmp, rollAmp: rollAmpVal, verticalMov: vertMov, verticalAcc: vertAcc,
+            // Level 2
+            driftAngle, rudderComp, lateralDrift,
+            // Level 3
+            windHeelDeg, gmt, gmtStatus,
+            // Level 4
+            calmRes, addedRes, effectivePower, speedLossPct
+          }, "*");
+        } catch(e) {
+          console.warn('sendMotionData error:', e);
+        }
+      }
+
+      requestAnimationFrame(animate);
+    })();
+  </script>
+</body>
+</html>
