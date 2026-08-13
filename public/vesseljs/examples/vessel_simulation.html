@@ -241,11 +241,10 @@
 
               // Level-specific 3D effects (physics-accurate)
               if (activeLevel === 'lvl2') {
-                // Level 2: Drift & Manoeuvring
-                var currentDriftX = (lastCurrentVel || 0) * tSec * Math.cos(currentDirRad);
-                var currentDriftY = (lastCurrentVel || 0) * tSec * Math.sin(currentDirRad);
-                ship3D.position.x = currentDriftX;
-                ship3D.position.y = currentDriftY;
+                // Level 2: Drift — yaw from drift angle + wave motion
+                var driftRad = (lastDriftAngle || 0) * Math.PI / 180;
+                ship3D.rotation.z = -driftRad;
+                ship3D.position.x = (lastLateralDrift || 0) * Math.sin(tSec * 0.3);
                 ship3D.position.z = baseHeave;
                 ship3D.rotation.y = basePitch;
                 ship3D.rotation.x = baseRoll;
