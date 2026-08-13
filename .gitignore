@@ -39,3 +39,11 @@ __screenshots__/
 *.timestamp-*-*.mjs
 .vercel
 .env*
+
+# Build artifacts & large binaries
+release/
+diag*.cjs
+diag*.png
+*.png
+!public/**/*.png
+!src/**/*.png
