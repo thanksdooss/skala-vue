@@ -367,7 +367,6 @@ onUnmounted(() => {
 
 @media (max-width: 640px) {
   .system-tag { display: none; }
-  .skala-sub { display: none; }
 
   .live-status-pill {
     font-size: 0.65rem;
