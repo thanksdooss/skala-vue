@@ -88,8 +88,15 @@
       var container = document.createElement("div");
       Object.assign(container.style, {
         position: "absolute", top: "0", left: "0",
-        width: "100vw", height: "100vh"
+        width: "100%", height: "100%"
       });
+      document.body.style.margin = '0';
+      document.body.style.padding = '0';
+      document.body.style.overflow = 'hidden';
+      document.body.style.width = '100%';
+      document.body.style.height = '100%';
+      document.documentElement.style.width = '100%';
+      document.documentElement.style.height = '100%';
       document.body.appendChild(container);
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -213,10 +220,16 @@
       onResize();
 
       function onResize() {
-        camera.aspect = window.innerWidth / window.innerHeight;
+        var w = container.clientWidth || window.innerWidth || 300;
+        var h = container.clientHeight || window.innerHeight || 300;
+        if (w < 10 || h < 10) return; // not laid out yet
+        camera.aspect = w / h;
         camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setSize(w, h);
       }
+      // Mobile iframes may delay layout — retry resize
+      setTimeout(onResize, 500);
+      setTimeout(onResize, 1500);
 
       // Animation loop
       var frameCount = 0;

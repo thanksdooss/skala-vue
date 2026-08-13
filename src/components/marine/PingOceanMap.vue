@@ -277,4 +277,38 @@ onUnmounted(() => { if (map) map.remove(); });
   color: #60a5fa;
   background: rgba(37, 99, 235, 0.12);
 }
+
+@media (max-width: 640px) {
+  .map-controls-overlay {
+    top: 8px; left: 8px; right: 8px;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ping-coord-pill {
+    font-size: 0.65rem;
+    padding: 5px 10px;
+  }
+  .layer-toggles {
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .layer-btn {
+    font-size: 0.6rem;
+    padding: 4px 7px;
+  }
+  .separator {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .ping-coord-pill {
+    font-size: 0.58rem;
+    padding: 4px 8px;
+  }
+  .layer-btn {
+    font-size: 0.55rem;
+    padding: 3px 5px;
+  }
+}
 </style>
