@@ -76,53 +76,53 @@
 
 <h2 id="architecture">📐 시스템 아키텍처</h2>
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                    SKALA marine (Vue 3)                   │
-│                                                          │
-│  ┌─────────────┐  ┌──────────────────┐  ┌─────────────┐ │
-│  │ PingOceanMap│  │VesselJsSimulator │  │  Telemetry  │ │
-│  │  (Leaflet)  │  │  (iframe bridge) │  │    HUD      │ │
-│  │             │  │                  │  │             │ │
-│  │  Click ──────▶│ postMessage ──────▶│  │ ◀── Motion  │ │
-│  │  → lat/lon  │  │  MARINE_API_     │  │    Data     │ │
-│  │             │  │  UPDATE          │  │             │ │
-│  └──────┬──────┘  └────────┬─────────┘  └─────────────┘ │
-│         │                  │                             │
-│         ▼                  ▼                             │
-│  ┌─────────────┐  ┌──────────────────────────────────┐  │
-│  │ useOpenMeteo│  │  vessel_simulation.html (iframe)  │  │
-│  │ (Composable)│  │                                   │  │
-│  │             │  │  Three.js r126 + Vessel.js Engine │  │
-│  │ Open-Meteo ─┤  │  ┌──────────┐ ┌───────────────┐  │  │
-│  │ Marine API  │  │  │ Ship3D   │ │ WaveMotion    │  │  │
-│  │ Weather API │  │  │ (PX121)  │ │ 6-DOF RAO     │  │  │
-│  │             │  │  └──────────┘ └───────────────┘  │  │
-│  └─────────────┘  │  ┌──────────┐ ┌───────────────┐  │  │
-│                   │  │ Ocean    │ │ HullResistance│  │  │
-│                   │  │ (Water)  │ │ (Holtrop)     │  │  │
-│                   │  └──────────┘ └───────────────┘  │  │
-│                   └──────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
-                         │
-              ┌──────────┴──────────┐
-              │   Open-Meteo APIs   │
-              │  • Marine Forecast  │
-              │  • Weather Current  │
-              └─────────────────────┘
+```mermaid
+graph TB
+    subgraph VUE ["SKALA marine (Vue 3)"]
+        direction TB
+        subgraph COMPONENTS ["UI Components"]
+            direction LR
+            MAP["🗺️ PingOceanMap<br/>(Leaflet)"]
+            SIM["🚢 VesselJsSimulator<br/>(iframe bridge)"]
+            HUD["📊 Telemetry HUD<br/>(Live Data)"]
+        end
+
+        subgraph ENGINE ["Vessel.js Engine (iframe)"]
+            direction LR
+            SHIP3D["Ship3D<br/>(PX121 PSV)"]
+            WAVE["WaveMotion<br/>(6-DOF RAO)"]
+            OCEAN["Ocean<br/>(Water Surface)"]
+            HULL["HullResistance<br/>(Holtrop)"]
+        end
+
+        COMPOSABLE["useOpenMeteo<br/>(Composable)"]
+    end
+
+    API["🌐 Open-Meteo APIs<br/>Marine Forecast + Weather"]
+
+    MAP -- "Click → lat/lon" --> SIM
+    SIM -- "postMessage<br/>MARINE_API_UPDATE" --> ENGINE
+    ENGINE -- "postMessage<br/>VESSEL_MOTION_DATA" --> HUD
+    MAP -- "위치 변경" --> COMPOSABLE
+    COMPOSABLE -- "fetch" --> API
+    API -- "파고·주기·풍속" --> COMPOSABLE
+    COMPOSABLE -- "props" --> SIM
+
+    style VUE fill:#0b0f17,stroke:#00a261,color:#f3f4f6
+    style COMPONENTS fill:#121824,stroke:#232d3f,color:#f3f4f6
+    style ENGINE fill:#121824,stroke:#232d3f,color:#f3f4f6
+    style API fill:#1a2332,stroke:#2563eb,color:#60a5fa
 ```
 
 ### 데이터 플로우
 
-```
-1. 사용자가 지도 클릭 → (lat, lon) 좌표 emit
-2. useOpenMeteo Composable이 Marine API + Weather API 동시 fetch
-3. 반응형 데이터가 VesselJsSimulator 컴포넌트로 props 전달
-4. iframe 내부 vessel_simulation.html로 postMessage 전송
-5. Vessel.js WaveMotion 엔진이 RAO 기반 6-DOF 운동 계산
-6. LVL별 물리 모델 적용 → Three.js로 실시간 3D 렌더링
-7. 계산 결과를 postMessage로 부모 Vue 앱에 역전송
-8. Telemetry HUD에 실시간 수치 표시
+```mermaid
+flowchart LR
+    A["🖱️ 지도 클릭<br/>(lat, lon)"] --> B["📡 useOpenMeteo<br/>Marine + Weather API"]
+    B --> C["📨 postMessage<br/>→ iframe"]
+    C --> D["⚙️ Vessel.js<br/>WaveMotion RAO"]
+    D --> E["🎮 Three.js<br/>6-DOF 렌더링"]
+    D --> F["📊 Telemetry HUD<br/>실시간 수치"]
 ```
 
 ---
