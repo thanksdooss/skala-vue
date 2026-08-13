@@ -155,7 +155,11 @@
         shipRef = ship;
         statesRef = ship.designState;
 
-        ship3D = new Ship3D(ship, { deckOpacity: 0.2, objectOpacity: 0 });
+        ship3D = new Ship3D(ship, { deckOpacity: 0, objectOpacity: 0 });
+        // Hide internal structures (decks, bulkheads, blocks) — keep only hull shell
+        if (ship3D.decks) ship3D.decks.visible = false;
+        if (ship3D.bulkheads) ship3D.bulkheads.visible = false;
+        if (ship3D.blocks) ship3D.blocks.visible = false;
         zUpCont.add(ship3D);
 
         // Ghost reference ship: outer hull wireframe only, at calm water attitude
