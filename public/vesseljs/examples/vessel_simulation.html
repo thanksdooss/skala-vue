@@ -167,8 +167,8 @@
         if (ship3D.decks) ship3D.decks.visible = false;
         if (ship3D.bulkheads) ship3D.bulkheads.visible = false;
         if (ship3D.blocks) ship3D.blocks.visible = false;
-        // Get actual draft from Ship3D (calculated by Vessel.js stability)
-        shipDraft = -ship3D.position.z || 6.5;
+        // Use design draft from ship specification (not stability-calculated T which can be much larger)
+        shipDraft = ship.designState.calculationParameters.Draft_design || 6.5;
         zUpCont.add(ship3D);
 
         // Ghost reference ship: outer hull wireframe only, at calm water attitude
