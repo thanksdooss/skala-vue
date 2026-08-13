@@ -164,21 +164,19 @@
 
         // Ghost reference ship: outer hull wireframe only, at calm water attitude
         ship3DGhost = new Ship3D(ship, { deckOpacity: 0, objectOpacity: 0 });
+        // Hide internal structures — keep only hull shell for wireframe
+        if (ship3DGhost.decks) ship3DGhost.decks.visible = false;
+        if (ship3DGhost.bulkheads) ship3DGhost.bulkheads.visible = false;
+        if (ship3DGhost.blocks) ship3DGhost.blocks.visible = false;
+        // Convert remaining hull meshes to green wireframe
         ship3DGhost.traverse(function(child) {
-          if (child.isMesh) {
-            var mat = child.material;
-            // Hide decks, objects, internal structures (bulkheads, double bottom, etc.)
-            // Only keep fully opaque hull shell (opacity ~1.0)
-            if (!mat || !child.visible || mat.opacity < 0.5) {
-              child.visible = false;
-            } else {
-              child.material = new THREE.MeshBasicMaterial({
-                color: 0x00a261,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.4
-              });
-            }
+          if (child.isMesh && child.visible) {
+            child.material = new THREE.MeshBasicMaterial({
+              color: 0x00a261,
+              wireframe: true,
+              transparent: true,
+              opacity: 0.4
+            });
           }
         });
         ship3DGhost.visible = showGhost;
