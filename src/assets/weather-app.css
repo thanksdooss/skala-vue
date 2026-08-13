@@ -1,0 +1,190 @@
+/* ==========================================================================
+   SKALA marine DESIGN SYSTEM
+   Ultra-Premium Enterprise Dark Theme
+   ========================================================================== */
+
+:root {
+  /* SKALA marine Brand Palette */
+  --hd-green-primary: #00a261;
+  --hd-green-hover: #00b86e;
+  --hd-green-dim: rgba(0, 162, 97, 0.15);
+  
+  --hd-blue-primary: #2563eb;
+  --hd-blue-dim: rgba(37, 99, 235, 0.15);
+  
+  /* Slate Dark Surfaces */
+  --bg-main: #0b0f17;
+  --bg-card: #121824;
+  --bg-card-hover: #182030;
+  --bg-subtle: #1a2332;
+  
+  /* Borders */
+  --border-color: #232d3f;
+  --border-color-light: #2d394e;
+  --border-accent: rgba(0, 162, 97, 0.4);
+  
+  /* Typography */
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --text-accent: #00a261;
+
+  /* Status Colors */
+  --status-normal: #10b981;
+  --status-warning: #f59e0b;
+  --status-danger: #ef4444;
+}
+
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+/* ==========================================================================
+   CARD & PANEL CONTAINERS (Hi-EMS Style)
+   ========================================================================== */
+.hd-panel {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hd-panel:hover {
+  border-color: var(--border-color-light);
+}
+
+.hd-panel-accent {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+}
+
+/* ==========================================================================
+   TYPOGRAPHY & HEADERS
+   ========================================================================== */
+.hd-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hd-title::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 14px;
+  background-color: var(--hd-green-primary);
+  border-radius: 2px;
+}
+
+.hd-title-mega {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.hd-subtitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--hd-green-primary);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+/* ==========================================================================
+   BUTTONS & BADGES
+   ========================================================================== */
+.hd-btn {
+  background-color: var(--hd-green-primary);
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.hd-btn:hover {
+  background-color: var(--hd-green-hover);
+}
+
+.hd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.hd-badge-normal {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.hd-badge-warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.hd-badge-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* ==========================================================================
+   SCROLLBAR & UTILITIES
+   ========================================================================== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-color-light);
+}
+
+/* Animations */
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUpFade 0.4s ease-out forwards;
+}
