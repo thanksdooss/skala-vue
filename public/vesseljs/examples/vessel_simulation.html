@@ -167,6 +167,8 @@
         if (ship3D.decks) ship3D.decks.visible = false;
         if (ship3D.bulkheads) ship3D.bulkheads.visible = false;
         if (ship3D.blocks) ship3D.blocks.visible = false;
+        // Get actual draft from Ship3D (calculated by Vessel.js stability)
+        shipDraft = -ship3D.position.z || 6.5;
         zUpCont.add(ship3D);
 
         // Ghost reference ship: outer hull wireframe only, at calm water attitude
@@ -260,13 +262,13 @@
                 var driftRad = (lastDriftAngle || 0) * Math.PI / 180;
                 ship3D.rotation.z = -driftRad;
                 ship3D.position.x = (lastLateralDrift || 0) * Math.sin(tSec * 0.3);
-                ship3D.position.z = baseHeave;
+                ship3D.position.z = -shipDraft + baseHeave;
                 ship3D.rotation.y = basePitch;
                 ship3D.rotation.x = baseRoll;
               } else if (activeLevel === 'lvl3') {
                 // Level 3: Wind Heel — exact heel angle + wave motion
                 var windHeelRad = (lastWindHeel || 0) * Math.PI / 180;
-                ship3D.position.z = baseHeave;
+                ship3D.position.z = -shipDraft + baseHeave;
                 ship3D.rotation.y = basePitch;
                 ship3D.rotation.x = baseRoll + windHeelRad;
                 ship3D.rotation.z = 0;
@@ -275,14 +277,14 @@
                 // Level 4: Speed Loss — slower encounter from resistance
                 var lossFrac = (lastSpeedLoss || 0) / 100;
                 var slowFreq = encounterFreq * Math.max(1 - lossFrac, 0.5);
-                ship3D.position.z = motion.heaveAmp * Math.cos(slowFreq * tSec);
+                ship3D.position.z = -shipDraft + motion.heaveAmp * Math.cos(slowFreq * tSec);
                 ship3D.rotation.y = motion.pitchAmp * Math.sin(slowFreq * tSec);
                 ship3D.rotation.x = (rollAmp || 0) * Math.sin(slowFreq * tSec * 0.7);
                 ship3D.rotation.z = 0;
                 ship3D.position.x = 0;
               } else {
                 // Level 1 (default): Pure seakeeping from RAO
-                ship3D.position.z = baseHeave;
+                ship3D.position.z = -shipDraft + baseHeave;
                 ship3D.rotation.y = basePitch;
                 ship3D.rotation.x = baseRoll;
                 ship3D.rotation.z = 0;
@@ -291,7 +293,7 @@
             }
           } catch(e) {
             // Fallback gentle motion
-            ship3D.position.z = waveAmplitude * Math.cos(tSec * 0.8);
+            ship3D.position.z = -shipDraft + waveAmplitude * Math.cos(tSec * 0.8);
             ship3D.rotation.y = 0.015 * Math.sin(tSec * 0.5);
           }
         }
