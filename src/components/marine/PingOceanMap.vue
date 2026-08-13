@@ -183,6 +183,7 @@ onMounted(() => {
 
 watch(() => [props.pingLat, props.pingLon], ([lat, lon]) => {
   if (pingMarker) pingMarker.setLatLng([lat, lon]);
+  updateNoDataCircle();
 });
 watch(() => props.noDataZone, () => updateNoDataCircle());
 
