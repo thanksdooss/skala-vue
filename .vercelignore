@@ -1,5 +1,3 @@
 node_modules
 release
 .cache
-puppeteer_test.js
-puppeteer_test.cjs

@@ -74,12 +74,18 @@ const tileLayers = {
     options: { attribution: '© Esri Topo', maxZoom: 18 }
   },
   dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    options: { attribution: '© CartoDB', maxZoom: 18, subdomains: 'abcd' }
+    // CARTO 기본 지도가 API 키를 요구하게 되어(워터마크 표시) 키가 필요 없는 Esri 다크 그레이로 교체
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    options: { attribution: '© Esri', maxZoom: 16 }
   }
 };
 
-const koreanLabelsUrl = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png';
+// 지명 라벨 레이어 (Esri, API 키 불필요)
+const labelUrls = {
+  dark: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  ocean: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
+};
 
 const createPingIcon = () => {
   const svg = `
@@ -103,9 +109,9 @@ const switchBaseLayer = (layerId) => {
   currentBaseLayer.setZIndex(1);
 
   if (koreanLabelsLayer) map.removeLayer(koreanLabelsLayer);
-  if (layerId !== 'dark' && layerId !== 'topo') {
-    koreanLabelsLayer = L.tileLayer(koreanLabelsUrl, {
-      subdomains: 'abcd', maxZoom: 18, zIndex: 100, opacity: 0.9
+  if (labelUrls[layerId]) {
+    koreanLabelsLayer = L.tileLayer(labelUrls[layerId], {
+      maxZoom: 16, zIndex: 100, opacity: 0.9
     }).addTo(map);
   }
 };

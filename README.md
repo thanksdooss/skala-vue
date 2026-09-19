@@ -238,7 +238,7 @@ npx vercel --prod
 
 이 프로젝트는 교육 목적으로 작성되었습니다.
 
-- **Vessel.js**: MIT License — [NTNU ShipLab](https://github.com/shiplab/vesseljs)
+- **Vessel.js**: MIT License — [NTNU ShipLab](https://github.com/shiplab/vesseljs) (라이선스 전문: `public/vesseljs/LICENSE`)
 - **Open-Meteo API**: Free for non-commercial use
 - **RainViewer API**: Free tier
 
