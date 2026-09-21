@@ -4,210 +4,195 @@
       ref="vesselFrame"
       src="/vesseljs/examples/vessel_simulation.html"
       class="vessel-iframe"
+      title="선박 3D 운동 렌더링"
       frameborder="0"
-      allowfullscreen
     ></iframe>
 
-    <!-- RAO overlay changes by level -->
-    <div class="rao-overlay">
-      <!-- Level 1: Seakeeping -->
-      <template v-if="activeLevel === 'lvl1'">
+    <div class="rao-overlay" role="group" aria-label="선박 운동 지표">
+      <template v-for="cell in cells" :key="cell.label">
         <div class="rao-cell">
-          <span class="rao-lbl">HEAVE</span>
-          <span class="rao-val">{{ motionData.heaveAmp.toFixed(2) }} m</span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">PITCH</span>
-          <span class="rao-val">{{ (motionData.pitchAmp * 180 / Math.PI).toFixed(1) }}°</span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">ROLL</span>
-          <span class="rao-val" :style="{ color: Math.abs(motionData.rollAmp * 180 / Math.PI) > 10 ? '#ef4444' : '#00a261' }">
-            {{ (motionData.rollAmp * 180 / Math.PI).toFixed(1) }}°
-          </span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">VERT. ACC.</span>
-          <span class="rao-val">{{ motionData.verticalAcc.toFixed(2) }} m/s²</span>
-        </div>
-      </template>
-
-      <!-- Level 2: Drift & Manoeuvring -->
-      <template v-else-if="activeLevel === 'lvl2'">
-        <div class="rao-cell">
-          <span class="rao-lbl">DRIFT ANGLE</span>
-          <span class="rao-val" :style="{ color: Math.abs(motionData.driftAngle) > 5 ? '#ef4444' : '#00a261' }">
-            {{ motionData.driftAngle.toFixed(1) }}°
-          </span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">RUDDER COMP.</span>
-          <span class="rao-val">{{ motionData.rudderComp.toFixed(1) }}°</span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">LATERAL DRIFT</span>
-          <span class="rao-val">{{ motionData.lateralDrift.toFixed(2) }} m/s</span>
-        </div>
-      </template>
-
-      <!-- Level 3: Wind Heel & Stability -->
-      <template v-else-if="activeLevel === 'lvl3'">
-        <div class="rao-cell">
-          <span class="rao-lbl">WIND HEEL</span>
-          <span class="rao-val" :style="{ color: motionData.windHeelDeg > 15 ? '#ef4444' : '#00a261' }">
-            {{ motionData.windHeelDeg.toFixed(1) }}°
-          </span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">GMt</span>
-          <span class="rao-val">{{ motionData.gmt.toFixed(2) }} m</span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">STABILITY</span>
-          <span class="rao-val" :style="{ color: motionData.gmtStatus === 'SAFE' ? '#00a261' : motionData.gmtStatus === 'WARNING' ? '#f59e0b' : '#ef4444' }">
-            {{ motionData.gmtStatus }}
-          </span>
-        </div>
-      </template>
-
-      <!-- Level 4: Resistance & Speed Loss -->
-      <template v-else-if="activeLevel === 'lvl4'">
-        <div class="rao-cell">
-          <span class="rao-lbl">ΔRaw</span>
-          <span class="rao-val">{{ motionData.addedRes.toFixed(1) }} kN</span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">SPEED LOSS</span>
-          <span class="rao-val" :style="{ color: motionData.speedLossPct > 10 ? '#ef4444' : '#00a261' }">
-            {{ motionData.speedLossPct.toFixed(1) }}%
-          </span>
-        </div>
-        <div class="rao-cell">
-          <span class="rao-lbl">EFF. POWER</span>
-          <span class="rao-val">{{ motionData.effectivePower.toFixed(0) }} kW</span>
+          <span class="rao-lbl">{{ cell.label }}</span>
+          <span class="rao-val" :style="{ color: cell.color }">{{ cell.text }}</span>
+          <ConfidenceBadge :quantity="cell.quantity" />
         </div>
       </template>
     </div>
 
-    <button class="ghost-toggle" :class="{ active: showGhost }" @click="toggleGhost">
-      <span class="toggle-dot"></span>
-      REFERENCE
-    </button>
+    <div class="viewport-controls">
+      <button
+        class="ghost-toggle"
+        :class="{ active: showGhost }"
+        :aria-pressed="String(showGhost)"
+        @click="showGhost = !showGhost"
+      >
+        <span class="toggle-dot" aria-hidden="true"></span>
+        정수 중 기준선
+      </button>
 
-    <div class="engine-tag">⚓ VESSEL.JS — NTNU ShipLab (PX121 PSV)</div>
+      <span class="fps-pill" :class="{ warn: quality !== 'high' }">
+        {{ fps > 0 ? `${fps} fps` : '측정 중' }} · {{ QUALITY_LABEL[quality] }}
+      </span>
+    </div>
+
+    <div class="engine-tag">
+      <strong>Vessel.js</strong><span class="tag-long"> NTNU ShipLab (MIT) · PX121 PSV</span>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, reactive } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
+import ConfidenceBadge from '../common/ConfidenceBadge.vue';
 
+/**
+ * Vessel.js 3D 렌더러와의 다리.
+ *
+ * 1단계 이전에는 이 iframe 안에서 물리 계산까지 했다. 지금은 계산 결과를 받아
+ * 렌더러로 내려보내기만 한다. 이 컴포넌트는 값을 만들지 않는다.
+ */
 const props = defineProps({
-  waveHeight: { type: Number, default: 1.5 },
-  wavePeriod: { type: Number, default: 8.0 },
-  waveDirection: { type: Number, default: 180 },
-  currentVelocity: { type: Number, default: 0 },
-  currentDirection: { type: Number, default: 0 },
-  windSpeed: { type: Number, default: 0 },
-  windDirection: { type: Number, default: 0 },
+  /** src/physics의 PhysicsSnapshot. null이면 아직 로딩 중. */
+  snapshot: { type: Object, default: null },
   activeLevel: { type: String, default: 'lvl1' }
 });
 
 const vesselFrame = ref(null);
-
-const motionData = reactive({
-  heaveAmp: 0,
-  pitchAmp: 0,
-  rollAmp: 0,
-  verticalMov: 0,
-  verticalAcc: 0,
-  // Level 2
-  driftAngle: 0,
-  rudderComp: 0,
-  lateralDrift: 0,
-  // Level 3
-  windHeelDeg: 0,
-  gmt: 0,
-  gmtStatus: 'N/A',
-  // Level 4
-  calmRes: 0,
-  addedRes: 0,
-  effectivePower: 0,
-  speedLossPct: 0
-});
-
 const showGhost = ref(false);
+const rendererReady = ref(false);
+const fps = ref(0);
+const quality = ref('high');
 
-const toggleGhost = () => {
-  showGhost.value = !showGhost.value;
-  if (vesselFrame.value && vesselFrame.value.contentWindow) {
-    vesselFrame.value.contentWindow.postMessage({
-      type: 'MARINE_API_UPDATE',
-      showGhost: showGhost.value
-    }, '*');
+const QUALITY_LABEL = { high: '고품질', medium: '표준', low: '저사양' };
+const DEG = Math.PI / 180;
+
+/**
+ * 품질 자동 조정.
+ *
+ * 연속 3초간 24 fps를 밑돌면 한 단계 낮추고, 연속 8초간 50 fps를 넘으면 한 단계 되돌린다.
+ * 되돌림을 넣은 이유: 한 번 잠깐 끊겼다고 남은 세션 내내 저품질로 두면 안 되기 때문이다.
+ * (탭이 가려졌을 때의 1 fps 표본은 렌더러 쪽에서 아예 보내지 않는다.)
+ */
+const QUALITY_ORDER = ['low', 'medium', 'high'];
+let lowSamples = 0;
+let highSamples = 0;
+
+function considerQuality(measured) {
+  if (measured === 0 || document.hidden) return;
+  const idx = QUALITY_ORDER.indexOf(quality.value);
+
+  if (measured < 24) {
+    highSamples = 0;
+    if (++lowSamples >= 3 && idx > 0) {
+      quality.value = QUALITY_ORDER[idx - 1];
+      lowSamples = 0;
+    }
+  } else if (measured > 50) {
+    lowSamples = 0;
+    if (++highSamples >= 8 && idx < QUALITY_ORDER.length - 1) {
+      quality.value = QUALITY_ORDER[idx + 1];
+      highSamples = 0;
+    }
+  } else {
+    lowSamples = 0;
+    highSamples = 0;
   }
-};
+}
 
-// Send Marine API data to Vessel.js iframe
-const sendMarineData = () => {
-  if (vesselFrame.value && vesselFrame.value.contentWindow) {
-    vesselFrame.value.contentWindow.postMessage({
-      type: 'MARINE_API_UPDATE',
-      waveHeight: props.waveHeight,
-      wavePeriod: props.wavePeriod,
-      waveDirection: props.waveDirection,
-      currentVelocity: props.currentVelocity,
-      currentDirection: props.currentDirection,
-      windSpeed: props.windSpeed,
-      windDirection: props.windDirection,
-      activeLevel: props.activeLevel,
-      showGhost: showGhost.value
-    }, '*');
-  }
-};
-
-// Receive motion telemetry from Vessel.js engine
-const onMessage = (event) => {
-  if (event.data && event.data.type === 'VESSEL_MOTION_DATA') {
-    motionData.heaveAmp = event.data.heaveAmp || 0;
-    motionData.pitchAmp = event.data.pitchAmp || 0;
-    motionData.rollAmp = event.data.rollAmp || 0;
-    motionData.verticalMov = event.data.verticalMov || 0;
-    motionData.verticalAcc = event.data.verticalAcc || 0;
-    // Level 2
-    motionData.driftAngle = event.data.driftAngle || 0;
-    motionData.rudderComp = event.data.rudderComp || 0;
-    motionData.lateralDrift = event.data.lateralDrift || 0;
-    // Level 3
-    motionData.windHeelDeg = event.data.windHeelDeg || 0;
-    motionData.gmt = event.data.gmt || 0;
-    motionData.gmtStatus = event.data.gmtStatus || 'N/A';
-    // Level 4
-    motionData.calmRes = event.data.calmRes || 0;
-    motionData.addedRes = event.data.addedRes || 0;
-    motionData.effectivePower = event.data.effectivePower || 0;
-    motionData.speedLossPct = event.data.speedLossPct || 0;
-  }
-};
-
-watch(() => [props.waveHeight, props.wavePeriod, props.waveDirection, 
-             props.currentVelocity, props.currentDirection,
-             props.windSpeed, props.windDirection, props.activeLevel], () => {
-  sendMarineData();
+/** 조우주기 — 3D 운동 재생 속도. 선속·파향이 반영된 실제 주기를 쓴다. */
+const encounterPeriod = computed(() => {
+  const s = props.snapshot;
+  if (!s) return 8;
+  const omega = (2 * Math.PI) / (s.sea.wavePeriod > 0 ? s.sea.wavePeriod : 8);
+  const k = (omega * omega) / 9.81;
+  const we = omega - k * s.vessel.speed * Math.cos(s.relativeWaveHeading * DEG);
+  return we > 0.05 ? (2 * Math.PI) / we : 8;
 });
 
-onMounted(() => {
-  window.addEventListener('message', onMessage);
-
-  // Wait for iframe to load, then send initial data
-  if (vesselFrame.value) {
-    vesselFrame.value.addEventListener('load', () => {
-      setTimeout(sendMarineData, 1000);
-    });
-  }
+const renderState = computed(() => {
+  const s = props.snapshot;
+  if (!s) return null;
+  const lvl = props.activeLevel;
+  return {
+    waveAmplitude: s.sea.waveHeight / 2,
+    wavePeriod: s.sea.wavePeriod,
+    waveDirection: s.sea.waveDirection,
+    heading: s.vessel.heading,
+    heaveAmp: s.seakeeping.heaveAmp.value,
+    pitchAmp: s.seakeeping.pitchAmp.value * DEG,
+    rollAmp: s.seakeeping.rollAmp.value * DEG,
+    // 풍압 경사와 표류는 해당 레벨에서만 3D에 반영한다(어느 효과를 보고 있는지 분명하게).
+    heelAngle: lvl === 'lvl3' ? s.windHeelReference.steady.value * DEG : 0,
+    driftAngle: lvl === 'lvl2' ? s.drift.driftAngle.value * DEG : 0,
+    lateralDrift: lvl === 'lvl2' ? s.drift.lateralSpeed.value : 0,
+    encounterPeriod: encounterPeriod.value,
+    showGhost: showGhost.value,
+    quality: quality.value
+  };
 });
 
-onUnmounted(() => {
-  window.removeEventListener('message', onMessage);
+function send() {
+  const frame = vesselFrame.value;
+  if (!frame?.contentWindow || !rendererReady.value || !renderState.value) return;
+  frame.contentWindow.postMessage({ type: 'RENDER_STATE', state: renderState.value }, window.location.origin);
+}
+
+function onMessage(event) {
+  // 렌더러는 같은 출처(public/)에서 온다. 다른 출처의 메시지는 받지 않는다.
+  if (event.origin !== window.location.origin) return;
+  const d = event.data;
+  if (d?.type === 'RENDERER_READY') {
+    rendererReady.value = true;
+    send();
+  } else if (d?.type === 'RENDERER_FPS') {
+    fps.value = d.fps;
+    considerQuality(d.fps);
+  }
+}
+
+watch([renderState, rendererReady], send, { deep: true });
+
+onMounted(() => window.addEventListener('message', onMessage));
+onUnmounted(() => window.removeEventListener('message', onMessage));
+
+const COLORS = { ok: 'var(--status-normal)', warn: 'var(--status-warning)', bad: 'var(--status-danger)' };
+const tone = (v, warn, bad) => (Math.abs(v) > bad ? COLORS.bad : Math.abs(v) > warn ? COLORS.warn : COLORS.ok);
+
+/** 레벨별로 보여줄 지표. 값과 배지를 항상 한 쌍으로 만든다. */
+const cells = computed(() => {
+  const s = props.snapshot;
+  if (!s) return [];
+  const f = (q, digits, suffix = '') => `${q.value.toFixed(digits)}${suffix || ' ' + q.unit}`;
+
+  switch (props.activeLevel) {
+    case 'lvl2':
+      return [
+        { label: '편류각', text: f(s.drift.driftAngle, 1), quantity: s.drift.driftAngle, color: tone(s.drift.driftAngle.value, 5, 15) },
+        { label: '횡방향 표류', text: f(s.drift.lateralSpeed, 2), quantity: s.drift.lateralSpeed, color: COLORS.ok },
+        { label: '풍압 편류', text: f(s.leeway, 2), quantity: s.leeway, color: COLORS.ok },
+        { label: '타각(참고)', text: f(s.rudder, 1), quantity: s.rudder, color: COLORS.ok }
+      ];
+    case 'lvl3':
+      return [
+        { label: '풍압 경사 (IMO)', text: f(s.windHeelReference.steady, 2), quantity: s.windHeelReference.steady, color: tone(s.windHeelReference.steady.value, 5, 15) },
+        { label: '돌풍 시', text: f(s.windHeelReference.gust, 2), quantity: s.windHeelReference.gust, color: tone(s.windHeelReference.gust.value, 8, 16) },
+        { label: '기존 추정식', text: f(s.windHeelEstimate, 2), quantity: s.windHeelEstimate, color: COLORS.warn },
+        { label: 'GMt', text: f(s.stability.gmt, 2), quantity: s.stability.gmt, color: s.stability.status === 'SAFE' ? COLORS.ok : s.stability.status === 'WARNING' ? COLORS.warn : COLORS.bad }
+      ];
+    case 'lvl4':
+      return [
+        { label: '정수저항', text: `${(s.resistance.calmResistance.value / 1000).toFixed(1)} kN`, quantity: s.resistance.calmResistance, color: COLORS.ok },
+        { label: '부가저항 ΔRaw', text: `${(s.resistance.addedResistance.value / 1000).toFixed(1)} kN`, quantity: s.resistance.addedResistance, color: COLORS.ok },
+        { label: '속도 손실', text: `${(s.resistance.speedLoss.value * 100).toFixed(1)} %`, quantity: s.resistance.speedLoss, color: tone(s.resistance.speedLoss.value * 100, 10, 25) },
+        { label: '유효마력', text: `${(s.resistance.effectivePower.value / 1000).toFixed(0)} kW`, quantity: s.resistance.effectivePower, color: COLORS.ok }
+      ];
+    default:
+      return [
+        { label: '상하동요 (heave)', text: f(s.seakeeping.heaveAmp, 2), quantity: s.seakeeping.heaveAmp, color: COLORS.ok },
+        { label: '종동요 (pitch)', text: f(s.seakeeping.pitchAmp, 1), quantity: s.seakeeping.pitchAmp, color: tone(s.seakeeping.pitchAmp.value, 3, 6) },
+        { label: '횡동요 (roll)', text: f(s.seakeeping.rollAmp, 1), quantity: s.seakeeping.rollAmp, color: tone(s.seakeeping.rollAmp.value, 6, 12) },
+        { label: '수직 가속도', text: f(s.seakeeping.verticalAcc, 2), quantity: s.seakeeping.verticalAcc, color: tone(s.seakeeping.verticalAcc.value, 2, 4) }
+      ];
+  }
 });
 </script>
 
@@ -222,44 +207,94 @@ onUnmounted(() => {
   background: #0b0f17;
 }
 
-.vessel-iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-}
+.vessel-iframe { width: 100%; height: 100%; border: none; display: block; }
 
 .rao-overlay {
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   z-index: 10;
 }
 
 .rao-cell {
-  background: rgba(11, 15, 23, 0.9);
+  background: rgba(11, 15, 23, 0.92);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 6px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
 }
 
 .rao-lbl {
   font-size: 0.6rem;
   font-weight: 800;
   color: var(--text-secondary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 
-.rao-val {
-  font-size: 1rem;
-  font-weight: 900;
-  color: var(--text-primary);
+.rao-val { font-size: 1rem; font-weight: 900; }
+
+.viewport-controls {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  z-index: 10;
 }
+
+.ghost-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(11, 15, 23, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text-secondary);
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.toggle-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transition: all 0.25s ease;
+}
+
+.ghost-toggle:hover { border-color: var(--text-accent); color: var(--text-primary); }
+.ghost-toggle.active {
+  background: rgba(0, 162, 97, 0.18);
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+.ghost-toggle.active .toggle-dot {
+  background: var(--text-accent);
+  box-shadow: 0 0 6px var(--text-accent);
+}
+
+.fps-pill {
+  background: rgba(11, 15, 23, 0.9);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+.fps-pill.warn { color: var(--status-warning); border-color: rgba(245, 158, 11, 0.5); }
 
 .engine-tag {
   position: absolute;
@@ -268,80 +303,24 @@ onUnmounted(() => {
   background: rgba(11, 15, 23, 0.85);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-color);
-  color: var(--hd-green-primary);
-  padding: 6px 12px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
   border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  z-index: 10;
-}
-
-.ghost-toggle {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(11, 15, 23, 0.9);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.5);
-  padding: 8px 14px;
-  border-radius: 6px;
   font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 1.5px;
-  cursor: pointer;
+  font-weight: 700;
   z-index: 10;
-  transition: all 0.25s ease;
 }
-
-.toggle-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.25);
-  transition: all 0.25s ease;
-}
-
-.ghost-toggle:hover {
-  border-color: rgba(0, 162, 97, 0.5);
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.ghost-toggle.active {
-  background: rgba(0, 162, 97, 0.15);
-  border-color: var(--hd-green-primary);
-  color: var(--hd-green-primary);
-}
-
-.ghost-toggle.active .toggle-dot {
-  background: var(--hd-green-primary);
-  box-shadow: 0 0 6px var(--hd-green-primary);
-}
+.engine-tag strong { color: var(--text-accent); }
 
 @media (max-width: 640px) {
-  .rao-overlay {
-    bottom: 8px;
-    left: 8px;
-    gap: 4px;
-  }
-  .rao-cell {
-    padding: 4px 8px;
-  }
+  .rao-overlay { bottom: 8px; left: 8px; right: 8px; gap: 4px; }
+  .rao-cell { padding: 4px 7px; }
   .rao-lbl { font-size: 0.5rem; }
   .rao-val { font-size: 0.8rem; }
-  .engine-tag {
-    top: 6px; right: 6px;
-    padding: 4px 8px;
-    font-size: 0.55rem;
-  }
-  .ghost-toggle {
-    top: 6px; left: 6px;
-    padding: 5px 10px;
-    font-size: 0.55rem;
-  }
+  .engine-tag { top: 6px; right: 6px; padding: 4px 7px; font-size: 0.55rem; }
+  .viewport-controls { top: 6px; left: 6px; }
+  .ghost-toggle, .fps-pill { padding: 5px 8px; font-size: 0.55rem; }
+  /* 좁은 화면에서 좌측 컨트롤과 우측 출처 태그가 겹쳐서, 태그를 줄인다 */
+  .tag-long { display: none; }
 }
 </style>

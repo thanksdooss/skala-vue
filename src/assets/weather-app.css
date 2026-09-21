@@ -1,16 +1,17 @@
 /* ==========================================================================
    SKALA marine DESIGN SYSTEM
-   Ultra-Premium Enterprise Dark Theme
+   디자인 토큰 + 공용 패널 + 접근성 공통 규칙만 남긴다.
+   (실제로 쓰이지 않던 유틸리티 클래스 12종은 제거했다)
    ========================================================================== */
 
 :root {
   /* SKALA marine Brand Palette */
-  --hd-green-primary: #00a261;
-  --hd-green-hover: #00b86e;
-  --hd-green-dim: rgba(0, 162, 97, 0.15);
+  --brand-green: #00a261;
+  --brand-green-hover: #00b86e;
+  --brand-green-dim: rgba(0, 162, 97, 0.15);
   
-  --hd-blue-primary: #2563eb;
-  --hd-blue-dim: rgba(37, 99, 235, 0.15);
+  --brand-blue: #2563eb;
+  --brand-blue-dim: rgba(37, 99, 235, 0.15);
   
   /* Slate Dark Surfaces */
   --bg-main: #0b0f17;
@@ -26,13 +27,18 @@
   /* Typography */
   --text-primary: #f3f4f6;
   --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
-  --text-accent: #00a261;
+  /* 3.68:1 → 5.45:1. 0.6rem 소형 텍스트에 쓰이므로 WCAG AA(4.5:1)를 넘겨야 한다. */
+  --text-muted: #868f9f;
+  --text-accent: #19c37d;
+
+  /* 키보드 포커스 링 — 모든 조작 요소에 공통 적용한다 */
+  --focus-ring: #7dd3fc;
 
   /* Status Colors */
-  --status-normal: #10b981;
+  /* 텍스트로 쓰는 상태색은 카드 배경(#121824) 대비 4.5:1 이상으로 맞췄다. */
+  --status-normal: #2dd48f;
   --status-warning: #f59e0b;
-  --status-danger: #ef4444;
+  --status-danger: #f87171;
 }
 
 body, html {
@@ -53,9 +59,9 @@ body, html {
 }
 
 /* ==========================================================================
-   CARD & PANEL CONTAINERS (Hi-EMS Style)
+   공용 패널
    ========================================================================== */
-.hd-panel {
+.app-panel {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -63,128 +69,39 @@ body, html {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.hd-panel:hover {
+.app-panel:hover {
   border-color: var(--border-color-light);
 }
 
-.hd-panel-accent {
-  background-color: var(--bg-card);
-  border: 1px solid var(--border-accent);
-  border-radius: 8px;
-}
-
-/* ==========================================================================
-   TYPOGRAPHY & HEADERS
-   ========================================================================== */
-.hd-title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.hd-title::before {
-  content: '';
-  display: inline-block;
-  width: 3px;
-  height: 14px;
-  background-color: var(--hd-green-primary);
-  border-radius: 2px;
-}
-
-.hd-title-mega {
-  font-size: 1.6rem;
-  font-weight: 800;
-  color: var(--text-primary);
-  letter-spacing: 0.5px;
-  margin: 0;
-}
-
-.hd-subtitle {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--hd-green-primary);
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-}
-
-/* ==========================================================================
-   BUTTONS & BADGES
-   ========================================================================== */
-.hd-btn {
-  background-color: var(--hd-green-primary);
-  color: #ffffff;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-weight: 700;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.hd-btn:hover {
-  background-color: var(--hd-green-hover);
-}
-
-.hd-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.hd-badge-normal {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-}
-
-.hd-badge-warning {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-}
-
-.hd-badge-danger {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-}
-
-/* ==========================================================================
-   SCROLLBAR & UTILITIES
-   ========================================================================== */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg-main);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--border-color);
+/* ──────────────────────────────────────────────────────────
+   접근성 공통 규칙
+   1단계 점검에서 키보드 포커스 표시가 전혀 없었고(WCAG 2.4.7),
+   index.html이 확대를 막고 있었다(WCAG 1.4.4). 둘 다 여기와 index.html에서 고쳤다.
+   ────────────────────────────────────────────────────────── */
+:where(button, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
   border-radius: 4px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--border-color-light);
+
+/* 스크린리더 전용 텍스트 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-/* Animations */
-@keyframes slideUpFade {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-slide-up {
-  animation: slideUpFade 0.4s ease-out forwards;
+/* 동작 최소화 선호 시 장식 애니메이션을 끈다 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
