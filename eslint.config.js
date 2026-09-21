@@ -11,7 +11,15 @@ export default defineConfig([
     files: ['**/*.{vue,js,mjs,jsx}'],
   },
 
-  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
+  // 벤더 코드(Vessel.js, Three.js 동봉본)는 검사하지 않는다.
+  // 우리가 고칠 수 없고, 고치면 업스트림과 갈라져 업그레이드가 막힌다.
+  globalIgnores([
+    '**/dist/**',
+    '**/dist-ssr/**',
+    '**/coverage/**',
+    'public/vesseljs/source/**',
+    'public/vesseljs/examples/3D_engine/**',
+  ]),
 
   {
     languageOptions: {

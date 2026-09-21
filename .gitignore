@@ -41,9 +41,13 @@ __screenshots__/
 .env*
 
 # Build artifacts & large binaries
-release/
 diag*.cjs
 diag*.png
 *.png
 !public/**/*.png
 !src/**/*.png
+
+# 로컬 전용 작업 지시문·도구 설정
+.claude/
+PROMPT.md
+.privacy-terms
