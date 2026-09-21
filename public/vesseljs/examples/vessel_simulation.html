@@ -1,14 +1,28 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-  <title>Vessel.js Ship in Ocean</title>
+  <meta charset="utf-8" />
+  <title>SKALA marine — 3D renderer</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: #0a1628; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a1628; }
     canvas { display: block; }
   </style>
 </head>
 <body>
+  <!--
+    이 페이지는 **렌더러다. 물리 계산을 하지 않는다.**
+
+    이전 버전에는 표류각·풍경사각·속도손실 추정식이 이 파일 안에 들어 있었다.
+    그 결과 (a) 내가 쓴 코드가 MIT 라이선스 벤더 디렉터리에 섞였고,
+    (b) Vite가 처리하지 않는 경로라 단위 테스트를 붙일 수 없었다.
+
+    지금은 부모 Vue 앱의 src/physics/가 모든 값을 계산해 postMessage로 내려보내고,
+    이 페이지는 받은 자세(heave·pitch·roll·heel·yaw)를 그리기만 한다.
+
+    Vessel.js(MIT, NTNU ShipLab) 원본 모듈은 한 줄도 고치지 않았다.
+    여기서는 선체 형상(Ship3D)과 해면(Ocean)만 가져다 쓴다.
+  -->
   <script type="module">
     "use strict";
 
@@ -19,396 +33,227 @@
     import { Skybox } from "./3D_engine/skybox.js";
     import { Ocean } from "./3D_engine/Regular_ocean.js";
 
-    var renderer, camera, controls;
-    var scene, zUpCont, ocean, ship3D, ship3DGhost, wavMo, skybox;
+    // ── 부모가 내려보내는 상태. 이 페이지는 이 값을 만들지 않고 받기만 한다. ──
+    const view = {
+      waveAmplitude: 0.75,   // m (= Hs / 2)
+      wavePeriod: 8,         // s
+      waveDirection: 180,    // deg
+      heading: 0,            // deg, 선수방위
+      heaveAmp: 0,           // m
+      pitchAmp: 0,           // rad
+      rollAmp: 0,            // rad
+      heelAngle: 0,          // rad, 풍압 정적 경사
+      driftAngle: 0,         // rad
+      lateralDrift: 0,       // m/s
+      encounterPeriod: 8,    // s — 운동 재생 주기
+      showGhost: false,
+      quality: "high"        // high | medium | low
+    };
 
-    var waveAmplitude = 1.5;
-    var wavePeriod = 8.0;
-    var waveDirection = 180;
-    var shipRef = null;
-    var statesRef = null;
-    var currentVelocity = 0;
-    var currentDirection = 0;
-    var windSpeed = 0;
-    var windDirection = 0;
-    var activeLevel = 'lvl1';
-    var hullRes = null;
-    var stabilityData = null;
-    var lastWindHeel = 0;
-    var lastDriftAngle = 0;
-    var lastLateralDrift = 0;
-    var lastSpeedLoss = 0;
-    var showGhost = false;
-    var shipDraft = 6.5;
+    let renderer, camera, controls, scene, zUpCont, ocean, ship3D, ghost, skybox;
+    let designDraft = 6.5;
+    /** 사용자가 카메라를 직접 조작했는가 — 조작 후에는 자동 프레이밍을 멈춘다 */
+    let userMovedCamera = false;
 
-    // Listen for Marine API data from parent Vue app
-    window.addEventListener("message", function(event) {
-      if (event.data && event.data.type === "MARINE_API_UPDATE") {
-        const d = event.data;
-        if (d.waveHeight !== undefined && d.waveHeight > 0) waveAmplitude = d.waveHeight / 2;
-        if (d.wavePeriod !== undefined && d.wavePeriod > 0) wavePeriod = d.wavePeriod;
-        if (d.waveDirection !== undefined) waveDirection = d.waveDirection;
-        if (d.currentVelocity !== undefined) currentVelocity = d.currentVelocity;
-        if (d.currentDirection !== undefined) currentDirection = d.currentDirection;
-        if (d.windSpeed !== undefined) windSpeed = d.windSpeed;
-        if (d.windDirection !== undefined) windDirection = d.windDirection;
-        if (d.activeLevel) activeLevel = d.activeLevel;
-        if (d.showGhost !== undefined) {
-          showGhost = d.showGhost;
-          if (ship3DGhost) ship3DGhost.visible = showGhost;
-        }
+    const QUALITY = {
+      high:   { segments: 127, pixelRatioCap: 2,   antialias: true  },
+      medium: { segments: 63,  pixelRatioCap: 1.5, antialias: true  },
+      low:    { segments: 31,  pixelRatioCap: 1,   antialias: false }
+    };
 
-        // Update ocean cosine wave visual parameters
-        if (ocean && ocean.waves && ocean.waves.length > 0) {
-          ocean.waves[0].A = waveAmplitude;
-          ocean.waves[0].T = wavePeriod;
-          ocean.waves[0].theta = waveDirection;
-        }
+    window.addEventListener("message", (event) => {
+      const d = event.data;
+      if (!d || d.type !== "RENDER_STATE") return;
 
-        // Recreate WaveMotion with new wave parameters for accurate RAO
-        if (ocean && ocean.wavCre && shipRef && statesRef) {
-          var freq = 2 * Math.PI / wavePeriod;
-          ocean.wavCre.setWaveDef(freq, waveAmplitude, waveDirection);
+      Object.assign(view, d.state || {});
 
-          // Must rebuild WaveMotion — RAO depends on wave frequency
-          try {
-            wavMo = new Vessel.WaveMotion(shipRef, statesRef, ocean.wavCre);
-            ocean.waveMotions = [wavMo];
-          } catch(e) {
-            console.warn("WaveMotion rebuild error:", e);
-          }
-        }
-
-        sendMotionData();
+      if (ocean && ocean.waves && ocean.waves.length > 0) {
+        ocean.waves[0].A = Math.max(view.waveAmplitude, 0.01);
+        ocean.waves[0].T = view.wavePeriod > 0 ? view.wavePeriod : 8;
+        ocean.waves[0].theta = view.waveDirection;
       }
+      if (ghost) ghost.visible = !!view.showGhost;
+      if (renderer && d.state && d.state.quality) applyQuality(d.state.quality);
     });
 
+    function applyQuality(level) {
+      const q = QUALITY[level] || QUALITY.high;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatioCap));
+      onResize();
+    }
+
     (async function main() {
-      document.body.style.overflow = "hidden";
-      var container = document.createElement("div");
-      Object.assign(container.style, {
-        position: "absolute", top: "0", left: "0",
-        width: "100%", height: "100%"
-      });
-      document.body.style.margin = '0';
-      document.body.style.padding = '0';
-      document.body.style.overflow = 'hidden';
-      document.body.style.width = '100%';
-      document.body.style.height = '100%';
-      document.documentElement.style.width = '100%';
-      document.documentElement.style.height = '100%';
+      const container = document.createElement("div");
+      Object.assign(container.style, { position: "absolute", inset: "0", width: "100%", height: "100%" });
       document.body.appendChild(container);
 
-      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
       renderer.setClearColor(0x99aadd);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       container.appendChild(renderer.domElement);
 
-      // Scene
       scene = new THREE.Scene();
-      var oSize = 2048;
+      const oSize = 2048;
 
-      // Add Skybox (sky + sun light) — original Vessel.js component
       skybox = new Skybox(oSize, "3D_engine/textures/skyboxsun25degtest1.png");
       scene.add(skybox);
 
-      // Z-up convention (naval architecture standard)
+      // 조선공학 관례인 z-up 좌표계로 맞춘다.
       THREE.Object3D.DefaultUp.set(0, 0, 1);
       zUpCont = new THREE.Group();
       zUpCont.rotation.x = -0.5 * Math.PI;
       scene.add(zUpCont);
 
-      // Camera — positioned to see ship from stern quarter, like bridge view
-      camera = new THREE.PerspectiveCamera(
-        26, window.innerWidth / window.innerHeight, 1, 1.75 * oSize
-      );
+      camera = new THREE.PerspectiveCamera(26, 1, 1, 1.75 * oSize);
       camera.up.set(0, 1, 0);
       camera.position.set(-120, 60, 120);
 
-      // OrbitControls
       controls = new OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 0, 0);
       controls.minDistance = 50;
       controls.maxDistance = 800;
       controls.update();
+      controls.addEventListener("start", () => { userMovedCamera = true; });
 
-      // Additional ambient light
       scene.add(new THREE.AmbientLight(0x606070, 0.4));
 
-      // Ocean — Vessel.js Regular Ocean with cosine waves
       ocean = new Ocean({
         size: oSize,
         segments: 127,
         sunDir: skybox.getSun().position.clone().normalize(),
         path: "3D_engine/textures/waternormals.jpg"
       });
-
-      // Add initial wave matching Marine API defaults
-      ocean.addCosineWave({
-        A: waveAmplitude,
-        T: wavePeriod,
-        theta: waveDirection,
-        phi: 0
-      });
-
+      ocean.addCosineWave({ A: view.waveAmplitude, T: view.wavePeriod, theta: view.waveDirection, phi: 0 });
       zUpCont.add(ocean);
 
-      // Load ship specification (PX121 Platform Supply Vessel)
       try {
-        var shipSpecResponse = await fetch("ship_specs/PX121_dbb.json");
-        var shipSpec = await shipSpecResponse.json();
+        const spec = await (await fetch("ship_specs/PX121_dbb.json")).json();
+        const ship = new Vessel.Ship(spec);
+        designDraft = ship.designState.calculationParameters.Draft_design || 6.5;
 
-        var ship = new Vessel.Ship(shipSpec);
-        shipRef = ship;
-        statesRef = ship.designState;
-
-        ship3D = new Ship3D(ship, { deckOpacity: 0, objectOpacity: 0 });
-        // Hide internal structures (decks, bulkheads, blocks) — keep only hull shell
-        if (ship3D.decks) ship3D.decks.visible = false;
-        if (ship3D.bulkheads) ship3D.bulkheads.visible = false;
-        if (ship3D.blocks) ship3D.blocks.visible = false;
-        // Use design draft from ship specification (not stability-calculated T which can be much larger)
-        shipDraft = ship.designState.calculationParameters.Draft_design || 6.5;
+        ship3D = buildHull(ship, false);
         zUpCont.add(ship3D);
 
-        // Ghost reference ship: outer hull wireframe only, at calm water attitude
-        ship3DGhost = new Ship3D(ship, { deckOpacity: 0, objectOpacity: 0 });
-        // Hide internal structures — keep only hull shell for wireframe
-        if (ship3DGhost.decks) ship3DGhost.decks.visible = false;
-        if (ship3DGhost.bulkheads) ship3DGhost.bulkheads.visible = false;
-        if (ship3DGhost.blocks) ship3DGhost.blocks.visible = false;
-        // Convert remaining hull meshes to green wireframe
-        ship3DGhost.traverse(function(child) {
-          if (child.isMesh && child.visible) {
-            child.material = new THREE.MeshBasicMaterial({
-              color: 0x00a261,
-              wireframe: true,
-              transparent: true,
-              opacity: 0.4
-            });
-          }
-        });
-        ship3DGhost.visible = showGhost;
-        zUpCont.add(ship3DGhost);
+        ghost = buildHull(ship, true);
+        ghost.visible = view.showGhost;
+        zUpCont.add(ghost);
 
-        // Vessel.js WaveMotion 6-DOF seakeeping engine
-        var freq = 2 * Math.PI / wavePeriod;
-        ocean.wavCre.setWaveDef(freq, waveAmplitude, waveDirection);
-        wavMo = new Vessel.WaveMotion(shipRef, statesRef, ocean.wavCre);
-        ocean.addWaveMotion(wavMo);
+        // 카메라가 수면 원점이 아니라 선체를 보게 맞춘다.
+        // zUpCont가 x축 -90°로 회전돼 있어, 선체의 z = −흘수는 월드 y = −흘수에 해당한다.
+        controls.target.set(0, -designDraft / 2, 0);
+        controls.update();
+        onResize();
 
-        // Level 3: Calculate initial stability
-        try {
-          stabilityData = shipRef.calculateStability(statesRef);
-        } catch(e) {
-          console.warn('Stability calculation error:', e);
-        }
-
-        // Level 4: Create HullResistance instance
-        try {
-          var propeller = { D: 3.2, noProps: 2, P: 3.5, AeAo: 0.55 }; // PSV-class defaults
-          hullRes = new Vessel.HullResistance(shipRef, statesRef, propeller, ocean.wavCre);
-        } catch(e) {
-          console.warn('HullResistance init error:', e);
-        }
-
-        sendMotionData();
-      } catch(e) {
+        notifyReady();
+      } catch (e) {
         console.error("Ship loading error:", e);
       }
 
-      // Resize handler
       window.addEventListener("resize", onResize);
       onResize();
-
-      function onResize() {
-        var w = container.clientWidth || window.innerWidth || 300;
-        var h = container.clientHeight || window.innerHeight || 300;
-        if (w < 10 || h < 10) return; // not laid out yet
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
-      }
-      // Mobile iframes may delay layout — retry resize
       setTimeout(onResize, 500);
       setTimeout(onResize, 1500);
 
-      // Animation loop
-      var frameCount = 0;
-      function animate(t) {
-        requestAnimationFrame(animate);
-        var tSec = t / 1000;
-
-        // Update ocean mesh vertices (Vessel.js cosine wave surface animation)
-        ocean.update(tSec);
-
-        // Apply Vessel.js WaveMotion RAO dynamics to Ship3D
-        if (wavMo && ship3D) {
-          try {
-            var motion = wavMo.verticalMotion;
-            var rollAmp = wavMo.rollAmp;
-
-            if (motion) {
-              var encounterFreq = 2 * Math.PI / wavePeriod;
-
-              // Base wave motion (always present)
-              var baseHeave = motion.heaveAmp * Math.cos(encounterFreq * tSec);
-              var basePitch = motion.pitchAmp * Math.sin(encounterFreq * tSec);
-              var baseRoll = (rollAmp || 0) * Math.sin(encounterFreq * tSec * 0.7);
-
-              // Level-specific 3D effects (physics-accurate)
-              if (activeLevel === 'lvl2') {
-                // Level 2: Drift — yaw from drift angle + wave motion
-                var driftRad = (lastDriftAngle || 0) * Math.PI / 180;
-                ship3D.rotation.z = -driftRad;
-                ship3D.position.x = (lastLateralDrift || 0) * Math.sin(tSec * 0.3);
-                ship3D.position.z = -shipDraft + baseHeave;
-                ship3D.rotation.y = basePitch;
-                ship3D.rotation.x = baseRoll;
-              } else if (activeLevel === 'lvl3') {
-                // Level 3: Wind Heel — exact heel angle + wave motion
-                var windHeelRad = (lastWindHeel || 0) * Math.PI / 180;
-                ship3D.position.z = -shipDraft + baseHeave;
-                ship3D.rotation.y = basePitch;
-                ship3D.rotation.x = baseRoll + windHeelRad;
-                ship3D.rotation.z = 0;
-                ship3D.position.x = 0;
-              } else if (activeLevel === 'lvl4') {
-                // Level 4: Speed Loss — slower encounter from resistance
-                var lossFrac = (lastSpeedLoss || 0) / 100;
-                var slowFreq = encounterFreq * Math.max(1 - lossFrac, 0.5);
-                ship3D.position.z = -shipDraft + motion.heaveAmp * Math.cos(slowFreq * tSec);
-                ship3D.rotation.y = motion.pitchAmp * Math.sin(slowFreq * tSec);
-                ship3D.rotation.x = (rollAmp || 0) * Math.sin(slowFreq * tSec * 0.7);
-                ship3D.rotation.z = 0;
-                ship3D.position.x = 0;
-              } else {
-                // Level 1 (default): Pure seakeeping from RAO
-                ship3D.position.z = -shipDraft + baseHeave;
-                ship3D.rotation.y = basePitch;
-                ship3D.rotation.x = baseRoll;
-                ship3D.rotation.z = 0;
-                ship3D.position.x = 0;
-              }
-            }
-          } catch(e) {
-            // Fallback gentle motion
-            ship3D.position.z = -shipDraft + waveAmplitude * Math.cos(tSec * 0.8);
-            ship3D.rotation.y = 0.015 * Math.sin(tSec * 0.5);
-          }
-        }
-
-        // Ghost: same position as dynamic ship, but zero rotation (calm water attitude)
-        if (ship3DGhost && ship3DGhost.visible) {
-          ship3DGhost.position.copy(ship3D.position);
-          ship3DGhost.rotation.set(0, 0, 0);
-        }
-
-        controls.update();
-        renderer.render(scene, camera);
-
-        // Send motion telemetry to parent Vue app every ~30 frames
-        frameCount++;
-        if (frameCount % 30 === 0) sendMotionData();
-      }
-
-      function sendMotionData() {
-        try {
-          // Level 1: Seakeeping RAO
-          var heaveAmp = 0, pitchAmp = 0, rollAmpVal = 0, vertMov = 0, vertAcc = 0;
-          if (wavMo) {
-            var motion = wavMo.verticalMotion;
-            if (motion) {
-              heaveAmp = motion.heaveAmp || 0;
-              pitchAmp = motion.pitchAmp || 0;
-              vertMov = motion.verticalMov || 0;
-              vertAcc = motion.verticalAcc || 0;
-            }
-            rollAmpVal = wavMo.rollAmp || 0;
-          }
-
-          // Level 2: Drift & Manoeuvring
-          var driftAngle = 0, rudderComp = 0, lateralDrift = 0;
-          if (currentVelocity > 0) {
-            var shipSpeed = 10 * 0.5144; // 10 knots in m/s (design speed)
-            var Vc = currentVelocity;
-            var headingRad = 0; // ship heading (assume 0 for now)
-            var thetaC = currentDirection * Math.PI / 180;
-            var relAngle = thetaC - headingRad;
-            var lateralV = Vc * Math.sin(relAngle);
-            var longitudinalV = shipSpeed + Vc * Math.cos(relAngle);
-            driftAngle = Math.atan2(lateralV, Math.abs(longitudinalV)) * 180 / Math.PI;
-            rudderComp = Math.min(Math.abs(driftAngle * 2.5), 35); // max 35° rudder
-            lateralDrift = Math.abs(lateralV);
-          }
-
-          // Level 3: Wind Heel & Stability
-          var windHeelDeg = 0, gmt = 0, gmtStatus = 'N/A';
-          if (stabilityData) {
-            gmt = stabilityData.GMt || 0;
-          }
-          if (windSpeed > 0 && gmt > 0 && shipRef) {
-            var Vw = windSpeed / 3.6; // km/h to m/s
-            var rhoAir = 1.225;
-            var LOA = shipRef.attributes.LOA || 82;
-            var Depth = shipRef.attributes.Depth || 8;
-            var Draft = 6.5;
-            var Aw = LOA * (Depth - Draft + 3) * 0.6; // windage area above waterline
-            var hw = (Depth - Draft + 3) / 2; // center of windage above waterline
-            var displacement = LOA * 18 * Draft * 0.68 * 1025; // approx Δ in kg
-            var windMoment = 0.5 * rhoAir * Vw * Vw * Aw * hw;
-            var restoreMoment = displacement * 9.81 * gmt;
-            windHeelDeg = (restoreMoment > 0) ? (windMoment / restoreMoment) * (180 / Math.PI) : 0;
-            windHeelDeg = Math.min(windHeelDeg, 45); // cap at 45°
-          }
-          if (gmt > 0.5) gmtStatus = 'SAFE';
-          else if (gmt > 0.15) gmtStatus = 'WARNING';
-          else gmtStatus = 'CRITICAL';
-
-          lastWindHeel = windHeelDeg; // Save for animation loop
-          lastDriftAngle = driftAngle;
-          lastLateralDrift = lateralDrift;
-
-          // Level 4: Hull Resistance & Speed Loss
-          var calmRes = 0, addedRes = 0, effectivePower = 0, speedLossPct = 0;
-          if (hullRes) {
-            try {
-              calmRes = hullRes.calmResistance / 1000 || 0; // N to kN
-              var totalR = hullRes.totalResistance;
-              if (totalR) {
-                addedRes = (totalR.Rtadd / 1000) - calmRes || 0;
-                effectivePower = (totalR.Pe / 1000) || 0; // W to kW
-              }
-              if (calmRes > 0) {
-                speedLossPct = Math.min((addedRes / (3 * calmRes)) * 100, 50);
-              }
-            } catch(e) {
-              // Use simplified Holtrop if HullResistance fails
-              var Hs = waveAmplitude * 2;
-              addedRes = 18.5 * Hs * Hs * Math.sqrt(290 / 100) / 1000;
-            }
-          }
-
-          lastSpeedLoss = speedLossPct; // Save for animation loop
-
-          window.parent.postMessage({
-            type: "VESSEL_MOTION_DATA",
-            // Level 1
-            heaveAmp, pitchAmp, rollAmp: rollAmpVal, verticalMov: vertMov, verticalAcc: vertAcc,
-            // Level 2
-            driftAngle, rudderComp, lateralDrift,
-            // Level 3
-            windHeelDeg, gmt, gmtStatus,
-            // Level 4
-            calmRes, addedRes, effectivePower, speedLossPct
-          }, "*");
-        } catch(e) {
-          console.warn('sendMotionData error:', e);
-        }
-      }
-
       requestAnimationFrame(animate);
     })();
+
+    function buildHull(ship, wireframe) {
+      const obj = new Ship3D(ship, { deckOpacity: 0, objectOpacity: 0 });
+      // 내부 구조물은 숨기고 선체 외판만 남긴다.
+      if (obj.decks) obj.decks.visible = false;
+      if (obj.bulkheads) obj.bulkheads.visible = false;
+      if (obj.blocks) obj.blocks.visible = false;
+      if (wireframe) {
+        obj.traverse((child) => {
+          if (child.isMesh && child.visible) {
+            child.material = new THREE.MeshBasicMaterial({
+              color: 0x00a261, wireframe: true, transparent: true, opacity: 0.4
+            });
+          }
+        });
+      }
+      return obj;
+    }
+
+    function onResize() {
+      const w = window.innerWidth || 300;
+      const h = window.innerHeight || 300;
+      if (w < 10 || h < 10) return;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+
+      // 세로로 긴 화면(모바일)에서는 같은 화각으로 선체가 잘린다. 카메라를 뒤로 물린다.
+      // 사용자가 한 번이라도 직접 돌리거나 확대한 뒤에는 건드리지 않는다.
+      if (!userMovedCamera) {
+        // 화각 26°에서 거리 190 m면 세로로 약 88 m가 들어온다(LOA 82 m 선체가 화면을 채움).
+        // 세로로 긴 화면에서는 가로가 먼저 잘리므로 종횡비로 나눠 같은 폭을 확보한다.
+        const BASE_DISTANCE = 190;
+        const dist = Math.min(BASE_DISTANCE / Math.min(w / h, 1), controls.maxDistance);
+        const dir = camera.position.clone().sub(controls.target).normalize();
+        camera.position.copy(controls.target).add(dir.multiplyScalar(dist));
+        controls.update();
+      }
+    }
+
+    function notifyReady() {
+      // 부모가 "언제 보내야 하나"를 setTimeout으로 추측하지 않도록 준비 완료를 알린다.
+      window.parent.postMessage({ type: "RENDERER_READY" }, "*");
+    }
+
+    // ── fps 측정: 부모가 저사양 기기에서 품질을 낮출 판단 근거로 쓴다 ──
+    //
+    // 탭이 가려지면 브라우저가 requestAnimationFrame을 1 Hz로 낮춘다. 그 값을 그대로 보내면
+    // 부모가 "저사양 기기"로 오해해 품질을 떨어뜨린다(실제로 그렇게 동작하는 것을 확인하고 고쳤다).
+    // 따라서 가려져 있는 동안의 표본은 보내지 않고, 다시 보일 때 측정 창을 새로 연다.
+    let frames = 0;
+    let fpsWindowStart = performance.now();
+
+    document.addEventListener("visibilitychange", () => {
+      frames = 0;
+      fpsWindowStart = performance.now();
+    });
+
+    function animate(tMs) {
+      requestAnimationFrame(animate);
+      const t = tMs / 1000;
+
+      ocean.update(t);
+
+      if (ship3D) {
+        // 운동 재생은 조우주기로 한다. 부모가 선속·파향으로 계산해 내려준다.
+        const we = (2 * Math.PI) / (view.encounterPeriod > 0 ? view.encounterPeriod : 8);
+
+        ship3D.position.z = -designDraft + view.heaveAmp * Math.cos(we * t);
+        ship3D.rotation.y = view.pitchAmp * Math.sin(we * t);
+        // 횡동요는 파랑 성분 위에 풍압 정적 경사를 더한다.
+        ship3D.rotation.x = view.rollAmp * Math.sin(we * t * 0.7) + view.heelAngle;
+        ship3D.rotation.z = -view.driftAngle;
+        ship3D.position.x = view.lateralDrift * Math.sin(t * 0.3);
+
+        if (ghost && ghost.visible) {
+          // 비교용 유령선: 같은 위치, 정수 중 자세.
+          ghost.position.set(0, 0, -designDraft);
+          ghost.rotation.set(0, 0, 0);
+        }
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+
+      frames++;
+      const now = performance.now();
+      if (now - fpsWindowStart >= 1000) {
+        if (!document.hidden) {
+          window.parent.postMessage(
+            { type: "RENDERER_FPS", fps: Math.round((frames * 1000) / (now - fpsWindowStart)) },
+            "*"
+          );
+        }
+        frames = 0;
+        fpsWindowStart = now;
+      }
+    }
   </script>
 </body>
 </html>

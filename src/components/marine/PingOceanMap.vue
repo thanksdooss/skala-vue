@@ -5,7 +5,7 @@
     <div class="map-controls-overlay">
       <div class="ping-coord-pill">
         📍 PING: <strong>{{ pingLat.toFixed(4) }}° N, {{ pingLon.toFixed(4) }}° E</strong>
-        <span v-if="noDataZone" class="no-data-badge">⚠ NO DATA</span>
+        <span v-if="noDataZone" class="no-data-badge">⚠ 해양 자료 없음</span>
       </div>
 
       <div class="layer-toggles">
@@ -37,7 +37,9 @@ import 'leaflet/dist/leaflet.css';
 const props = defineProps({
   pingLat: { type: Number, required: true },
   pingLon: { type: Number, required: true },
-  noDataZone: { type: Boolean, default: false }
+  noDataZone: { type: Boolean, default: false },
+  /** 비교 모드의 두 번째 해역. null이면 표시하지 않는다. */
+  secondaryPing: { type: Object, default: null }
 });
 
 const emit = defineEmits(['update-ping']);
@@ -47,6 +49,7 @@ let map = null;
 let pingMarker = null;
 let noDataCircle = null;
 let radarTileLayer = null;
+let secondaryMarker = null;
 let currentBaseLayer = null;
 let koreanLabelsLayer = null;
 
@@ -87,17 +90,33 @@ const labelUrls = {
   ocean: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
 };
 
-const createPingIcon = () => {
+const createPingIcon = (color = '#00a261', label = 'A') => {
   const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
-      <circle cx="20" cy="20" r="18" fill="rgba(0, 162, 97, 0.25)" stroke="#00a261" stroke-width="2">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" role="img" aria-label="선택한 해역 ${label}">
+      <circle cx="20" cy="20" r="18" fill="${color}40" stroke="${color}" stroke-width="2">
         <animate attributeName="r" values="12;18;12" dur="2s" repeatCount="indefinite" />
         <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite" />
       </circle>
-      <circle cx="20" cy="20" r="6" fill="#00a261" stroke="#ffffff" stroke-width="2" />
+      <circle cx="20" cy="20" r="8" fill="${color}" stroke="#ffffff" stroke-width="2" />
+      <text x="20" y="23.5" text-anchor="middle" font-size="9" font-weight="800" fill="#0b0f17">${label}</text>
     </svg>
   `;
-  return L.divIcon({ html: svg, className: 'hd-ping-div-icon', iconSize: [40, 40], iconAnchor: [20, 20] });
+  return L.divIcon({ html: svg, className: 'ping-div-icon', iconSize: [40, 40], iconAnchor: [20, 20] });
+};
+
+/** 비교 모드의 두 번째 마커를 현재 prop에 맞춘다. */
+const syncSecondary = () => {
+  if (!map) return;
+  const p = props.secondaryPing;
+  if (!p) {
+    if (secondaryMarker) { map.removeLayer(secondaryMarker); secondaryMarker = null; }
+    return;
+  }
+  if (!secondaryMarker) {
+    secondaryMarker = L.marker([p.lat, p.lon], { icon: createPingIcon('#7dd3fc', 'B') }).addTo(map);
+  } else {
+    secondaryMarker.setLatLng([p.lat, p.lon]);
+  }
 };
 
 const switchBaseLayer = (layerId) => {
@@ -185,6 +204,7 @@ onMounted(() => {
   // Pre-load RainViewer data (but don't show by default)
   loadRadar();
   updateNoDataCircle();
+  syncSecondary();
 });
 
 watch(() => [props.pingLat, props.pingLon], ([lat, lon]) => {
@@ -192,6 +212,7 @@ watch(() => [props.pingLat, props.pingLon], ([lat, lon]) => {
   updateNoDataCircle();
 });
 watch(() => props.noDataZone, () => updateNoDataCircle());
+watch(() => props.secondaryPing, syncSecondary, { deep: true });
 
 onUnmounted(() => { if (map) map.remove(); });
 </script>
@@ -231,12 +252,12 @@ onUnmounted(() => { if (map) map.remove(); });
   align-items: center;
   gap: 8px;
 }
-.ping-coord-pill strong { color: var(--hd-green-primary); }
+.ping-coord-pill strong { color: var(--text-accent); }
 
 .no-data-badge {
-  background: rgba(239, 68, 68, 0.2);
-  border: 1px solid #ef4444;
-  color: #ef4444;
+  background: rgba(248, 113, 113, 0.2);
+  border: 1px solid var(--status-danger);
+  color: var(--status-danger);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 0.65rem;
@@ -268,11 +289,11 @@ onUnmounted(() => { if (map) map.remove(); });
   white-space: nowrap;
 }
 .layer-btn.active {
-  border-color: var(--hd-green-primary);
-  color: var(--hd-green-primary);
+  border-color: var(--text-accent);
+  color: var(--text-accent);
   background: rgba(0, 162, 97, 0.12);
 }
-.layer-btn:hover { border-color: var(--hd-green-primary); }
+.layer-btn:hover { border-color: var(--text-accent); }
 
 .sat-btn.active {
   border-color: #a78bfa;
